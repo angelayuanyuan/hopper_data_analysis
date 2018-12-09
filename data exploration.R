@@ -62,6 +62,9 @@ watches$departure_weekday <- factor(watches$departure_weekday,levels = c("Monday
 watches$return_weekday <- weekdays(watches$return_date)
 watches$return_weekday <- factor(watches$return_weekday,levels = c("Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"))
 
+watches$weekend <- as.factor(ifelse(watches$departure_weekday=="Sunday"|watches$departure_weekday=="Saturday",1,0))
+
+
 watches$first_search_weekday <- factor(watches$first_search_weekday,levels = c("Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday"))
 
 # origin & destinations
@@ -89,11 +92,6 @@ hour_of_search_weekend <- watches%>%
   
 hour_of_search_weekend$hour_of_search <- as.numeric(format(ymd_hms(hour_of_search_weekend$first_search_dt),"%H"))
 
-ggplot(hour_of_search_weekend,aes(x = hour_of_search)) + stat_bin(breaks = (0:24-1), colour = "white",fill="pink") + coord_polar(start = 0) + theme_minimal() + 
-  scale_fill_brewer() + ylab("Count") + ggtitle("Searching by Time of day (Weekend)") +
-  scale_x_continuous(breaks = 0:23, labels = c(1:23,0))
-
-
 hour_of_search_workday <- watches%>%
   filter(weekend==0)%>%
   select(first_search_dt)
@@ -103,14 +101,26 @@ hour_of_search_workday$hour_of_search <- as.numeric(format(ymd_hms(hour_of_searc
 hour_of_search_workday$business <- hour_of_search_workday$hour_of_search %in% seq(9, 16)
 
 
+grid.arrange(
+ggplot(hour_of_search_weekend,aes(x = hour_of_search)) + stat_bin(breaks = (0:24-1), colour = "white",fill="pink") + coord_polar(start = 0) + theme_minimal() + 
+  scale_fill_brewer() + ylab("Count") + ggtitle("Searching by Time of day (Weekend)") +
+  scale_x_continuous(breaks = 0:23, labels = c(1:23,0)),
+
+
 ggplot(hour_of_search_workday,aes(x = hour_of_search,fill=business)) + stat_bin(breaks = (0:24-1),colour = "white") + coord_polar(start = 0) + theme_minimal() + 
   scale_fill_brewer() + ylab("Count") + ggtitle("Searching by Time of day (Weekday)") +
-  scale_x_continuous(breaks = 0:23, labels = c(1:23,0))
+  scale_x_continuous(breaks = 0:23, labels = c(1:23,0))+
+  theme(legend.position="none"),
+ncol=2)
 
 
 # search times
+grid.arrange(
 ggplot(watches)+
-  geom_bar(aes(first_search_weekday,fill=first_search_weekday))
+  geom_bar(aes(first_search_weekday,fill=first_search_weekday)),
+ggplot(watches)+
+  geom_bar(aes(first_search_weekday,fill=watch),position = "dodge"),
+ncol=2)
   
 
 ## till first buy
@@ -337,7 +347,7 @@ col.type <- sapply(rf.dta,class)
 
 ## split
 set.seed(2018)
-tr <- sample(nrow(rf.dta),700000)
+tr <- sample(nrow(watches),700000)
 rf.dta_tr <- rf.dta[tr,]
 rf.dta_te <-rf.dta[-tr,]
 
@@ -360,48 +370,48 @@ rf1@model$validation_metrics
 explainer_rf1 <- lime(as.data.frame(rf.dta_tr[,-10]), rf1, n_bins = 5)
 
 explanation_rf1 <- explain(
-  as.data.frame(rf.dta_te[c(1:3),-10]), 
+  as.data.frame(rf.dta_te[33,-10]), 
   explainer    = explainer_rf1, 
   n_labels     = 5,
   n_features   = 5)
 
 
 
-plot_features(explanation_rf1, ncol = 3)
+plot_features(explanation_rf1)
 
 
 explanation_rf1_shopped <- explain(
-  as.data.frame(rf.dta_te[c(1:4),-10]), 
+  as.data.frame(rf.dta_te[26,-10]), 
   explainer    = explainer_rf1, 
   labels = "shopped",
   n_features   = 5)
 
-plot_features(explanation_rf1_shopped, ncol = 2)
+plot_features(explanation_rf1_shopped)
 
 explanation_rf1_active <- explain(
-  as.data.frame(rf.dta_te[c(1:4),-10]), 
+  as.data.frame(rf.dta_te[246,-10]), 
   explainer    = explainer_rf1, 
   labels = "active",
   n_features   = 5)
 
-plot_features(explanation_rf1_active, ncol = 2)
+plot_features(explanation_rf1_active)
 
 explanation_rf1_expired <- explain(
-  as.data.frame(rf.dta_te[c(1:4),-10]), 
+  as.data.frame(rf.dta_te[258,-10]), 
   explainer    = explainer_rf1, 
   labels = "expired",
   n_features   = 5)
 
-plot_features(explanation_rf1_expired, ncol = 2)
+plot_features(explanation_rf1_expired)
 
 
 explanation_rf1_inactive <- explain(
-  as.data.frame(rf.dta_te[c(1:4),-10]), 
+  as.data.frame(rf.dta_te[74,-10]), 
   explainer    = explainer_rf1, 
   labels = "inactive",
   n_features   = 5)
 
-plot_features(explanation_rf1_inactive, ncol = 2)
+plot_features(explanation_rf1_inactive)
 
 
 
@@ -412,21 +422,23 @@ rf.dta_watch <- watches%>%
   filter(status_latest!="shopped")
 
 
+rf.dta_watch <- watches[,-c(1,2,8,9,10,15,16,17,18,19,27,28,30,35,36,41,43,45,47,48,50)]
 
-rf.dta1 <- rf.dta[,-10]
-col.type1 <- sapply(rf.dta1, class)
 
-rf.dta1_tr <- rf.dta1[tr,]
-rf.dta1_te <- rf.dta1[-tr,]
 
-rf.dta1_tr <- as.h2o(rf.dta1_tr,col.types=col.type1)
-rf.dta1_te <- as.h2o(rf.dta1_te,col.types=col.type1)
+col.type1 <- sapply(rf.dta_watch, class)
+
+rf.dta_watch_tr <- rf.dta_watch[tr,]
+rf.dta_watch_te <- rf.dta_watch[-tr,]
+
+rf.dta_watch_tr <- as.h2o(rf.dta_watch_tr,col.types=col.type1)
+rf.dta_watch_te <- as.h2o(rf.dta_watch_te,col.types=col.type1)
 
 
 rf2 <- h2o.randomForest(         
-  training_frame = rf.dta1_tr, 
-  validation_frame = rf.dta1_te,
-  y=32,                          
+  training_frame = rf.dta_watch_tr, 
+  validation_frame = rf.dta_watch_te,
+  y=10,                          
   ntrees = 200,                  
   stopping_rounds = 2,           
   seed = 2018)  
@@ -436,24 +448,43 @@ summary(rf2)
 h2o.varimp_plot(rf2, num_of_features = 10)  
 rf2@model$validation_metrics
 
-ggplot(rf.dta1)+
-  geom_bar(aes(active_users,fill=watch))
-ggplot(rf.dta1)+
-  geom_density(aes(status_updates,color=active_users)) # very skewed
-
-quantile(rf.dta1$status_updates,0.99999)
-
-ggplot(rf.dta1[rf.dta1$status_updates<=15,])+
-  geom_density(aes(status_updates,color=active_users))
 
 
-explainer_rf2 <- lime(as.data.frame(rf.dta1_tr[,-32]), rf2, n_bins = 5)
+explainer_rf2 <- lime(as.data.frame(rf.dta_watch_tr[,-10]), rf2, n_bins = 5)
 
 explanation_rf2 <- explain(
-  as.data.frame(rf.dta1_te[c(1:3),-32]), 
+  as.data.frame(rf.dta_watch_te[c(1:3),-10]), 
   explainer    = explainer_rf2, 
-  n_labels     = 2,
+  n_labels     = 4,
   n_features   = 5)
 
 
 plot_features(explanation_rf2, ncol = 2)
+
+
+
+explanation_rf2_active <- explain(
+  as.data.frame(rf.dta_watch_te[6,-10]), 
+  explainer    = explainer_rf2, 
+  labels = "active",
+  n_features   = 5)
+
+plot_features(explanation_rf2_active)
+
+explanation_rf2_expired <- explain(
+  as.data.frame(rf.dta_watch_te[808,-10]), 
+  explainer    = explainer_rf2, 
+  labels = "expired",
+  n_features   = 5)     # 787
+
+plot_features(explanation_rf2_expired)
+
+
+explanation_rf2_inactive <- explain(
+  as.data.frame(rf.dta_watch_te[2229,-10]), 
+  explainer    = explainer_rf2, 
+  labels = "inactive",
+  n_features   = 5)
+
+plot_features(explanation_rf2_inactive)
+

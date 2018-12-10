@@ -8,6 +8,9 @@ library(h2o)
 library(whereport)
 library(lime)
 library(gridExtra)
+library(ggcorrplot)
+library(factoextra)
+library(corrplot)
 
 
 # read data
@@ -247,6 +250,9 @@ median(user_freq$n)
 ggplot(user_freq[user_freq$n<=30,])+
   geom_bar(aes(n))
 
+
+
+
 ## returned user example
 user_231 <- watches%>%
   filter(user_id=="bace1d2481c4596372f1f987bd86734b4a1a27203a80fd577e0e43a224becaf2")
@@ -323,10 +329,20 @@ ggplot(watches)+
 
 # forecast price and status
 ggplot(watches[watches$forecast_first_good_price<2500,])+
-  geom_density(aes(forecast_first_good_price,color=status_latest))
+  geom_density(aes(forecast_first_good_price,color=watch))
 
 ggplot(watches[watches$forecast_last_good_price<2500,])+
-  geom_density(aes(forecast_last_good_price,color=status_latest))
+  geom_density(aes(forecast_last_good_price,color=watch))
+
+
+ggplot(watches[watches$forecast_min_target_price<2500,])+
+  geom_density(aes(forecast_min_target_price,color=watch))
+
+# first rec and watch
+ggplot(watches[watches$first_rec=="buy"|watches$first_rec=="wait",])+
+  geom_bar(aes(first_rec,fill=watch),position = "dodge")+
+  scale_y_continuous(labels = scales::comma)
+
 
 
 ###############################################
@@ -416,7 +432,7 @@ plot_features(explanation_rf1_inactive)
 
 
 
-# a step back: what makes people shop? (active users)
+# a step back
 
 rf.dta_watch <- watches%>%
   filter(status_latest!="shopped")
@@ -488,3 +504,107 @@ explanation_rf2_inactive <- explain(
 
 plot_features(explanation_rf2_inactive)
 
+
+# watch or not?
+watch.ex <- watches[,c(3,4,5,6,7,11,12,13,14,23,24,29,31,32,37,38,39,40,42,46,49,51)]
+col.type2 <- sapply(watch.ex,class)
+
+w.dta_tr <- watch.ex[tr,]
+w.dta_te <- watch.ex[-tr,]
+
+w.dta_tr <- as.h2o(w.dta_tr,col.types=col.type2)
+w.dta_te <- as.h2o(w.dta_te,col.types=col.type2)
+
+
+rf3 <- h2o.randomForest(         
+  training_frame = w.dta_tr, 
+  validation_frame = w.dta_te,
+  y=22,                          
+  ntrees = 200,                  
+  stopping_rounds = 2,           
+  seed = 2018)                
+
+summary(rf3) 
+h2o.varimp_plot(rf3, num_of_features = 10)  
+rf3@model$validation_metrics
+
+
+explainer_rf3 <- lime(as.data.frame(w.dta_tr[,-22]), rf3, n_bins = 5)
+
+explanation_rf3 <- explain(
+  as.data.frame(w.dta_te[97,-22]), 
+  explainer    = explainer_rf3, 
+  n_labels     = 2,
+  n_features   = 5)    
+
+plot_features(explanation_rf3)
+
+# correlation 
+corr <- round(cor(watches[,c(24,29,31,32,37,38,39,40,42)], use = "complete.obs"), 2)
+ggcorrplot(corr)
+
+
+# pca
+pc.dta <- watches[,c(24,29,31,32,37,38,39,40,42)]
+
+tr.pca <- prcomp(na.omit(pc.dta),
+                 center = TRUE,
+                 scale. = TRUE)
+
+
+eig.val <- get_eigenvalue(tr.pca)
+fviz_eig(tr.pca, addlabels = TRUE, ylim = c(0, 65))
+
+var <- get_pca_var(tr.pca)
+fviz_pca_var(tr.pca, alpha.var="contrib")
+
+corrplot(var$contrib, is.corr=FALSE)  
+
+fviz_contrib(tr.pca, choice = "var", axes = 1, top = 10)
+fviz_contrib(tr.pca, choice = "var", axes = 2, top = 10)
+fviz_contrib(tr.pca, choice = "var", axes = 3, top = 10)
+fviz_contrib(tr.pca, choice = "var", axes = 4, top = 10)
+
+# shop or not
+sh.dta <- rf.dta
+sh.dta$shop <- as.factor(ifelse(sh.dta$status_latest=="shopped",1,0))
+sh.dta <- sh.dta[,-c(10,11,12)]
+
+sh.dta_tr <- sh.dta[tr,]
+sh.dta_te <- sh.dta[-tr,]
+
+col.type3 <- sapply(sh.dta, class)
+
+
+sh.dta_tr <- as.h2o(sh.dta_tr,col.types=col.type3)
+sh.dta_te <- as.h2o(sh.dta_te,col.types=col.type3)
+
+
+rf4 <- h2o.randomForest(         
+  training_frame = sh.dta_tr, 
+  validation_frame = sh.dta_te,
+  y=28,                          
+  ntrees = 200,                  
+  stopping_rounds = 2,           
+  seed = 2018)                
+
+summary(rf4) 
+h2o.varimp_plot(rf4, num_of_features = 10)  
+rf4@model$validation_metrics
+
+explainer_rf4 <- lime(as.data.frame(sh.dta_tr[,-28]), rf4, n_bins = 5)
+explanation_rf4 <- explain(
+  as.data.frame(sh.dta_te[186,-28]), 
+  explainer    = explainer_rf4, 
+  n_labels     = 2,
+  n_features   = 5)  
+
+plot_features(explanation_rf4)
+
+
+ggplot(sh.dta[sh.dta$notification==1,])+
+  geom_bar(aes(shop,fill=shop))+
+  scale_y_continuous(labels = scales::comma)
+
+ggplot(sh.dta[sh.dta$notification==1&sh.dta$last_total<2000,])+
+  geom_density(aes(lowest_total,fill=shop),alpha=0.7)
